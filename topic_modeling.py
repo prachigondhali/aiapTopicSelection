@@ -17,8 +17,12 @@ import tflearn
 import pandas as pd
 import pickle
 
+tf.app.flags.DEFINE_integer('training_iteration', 1000,
+                            'number of training iterations.')
+tf.app.flags.DEFINE_integer('model_version', 1, 'version number of the model.')
+tf.app.flags.DEFINE_string('work_dir', '/tmp', 'Working directory.')
+FLAGS = tf.app.flags.FLAGS 
 
-# In[6]:
 class Topic():
     def __init__(self):
         #self.baseDir="C:/Users/A664107/Desktop/test code/abcnn_classify/"
@@ -32,11 +36,31 @@ class Topic():
     def trainPath(self):
         print("training Path")
         
-        #dfTicketData=pd.read_csv(self.sTicketDataFile)
-        self.words = []
+	sess = tf.Session()
+        
+	if len(sys.argv) < 2 or sys.argv[-1].startswith('-'):
+                print('Usage: mnist_export.py [--training_iteration=x] '
+                        '[--model_version=y] export_dir')
+                sys.exit(-1)
+        if FLAGS.training_iteration <= 0:
+                print 'Please specify a positive value for training iteration.'
+                sys.exit(-1)
+        if FLAGS.model_version <= 0:
+                print 'Please specify a positive value for version number.'
+                sys.exit(-1)
+        
+	self.words = []
         self.classes = []
         documents = []
-
+	
+	serialized_tf_example = tf.placeholder(tf.string, name='tf_example')
+        feature_configs = {
+        'query': tf.FixedLenFeature(
+            shape=[], dtype=tf.string),
+        }
+        tf_example = tf.parse_example(serialized_tf_example, feature_configs)
+        sentence = tf_example['query']
+	
         stopwords = nltk.corpus.stopwords.words("english")
         for index, row in self.dfTicketData.iterrows():
             pattern = str(row['Request Description'])
@@ -103,7 +127,50 @@ class Topic():
         self.model.save('/aiap-demo/model_Topic.tflearn')
         pickle.dump( {'words':self.words, 'classes':self.classes, 'train_x':train_x, 'train_y':train_y}, open( "/aiap-demo/Path_training_data", "wb" ) )
 
+	# Export model
+       
+        export_path_base = sys.argv[-1]
+        export_path = os.path.join(
+        tf.compat.as_bytes(export_path_base),
+        tf.compat.as_bytes(str(FLAGS.model_version)))
+        print 'Exporting trained model to', export_path
+        builder = tf.saved_model.builder.SavedModelBuilder(export_path)
+	
+	indices = tf.nn.top_k(self.classes, 0)
+	classify_inputs_tensor_info = tf.saved_model.utils.build_tensor_info(serialized_tf_example)
+        classes_output_tensor_info = tf.saved_model.utils.build_tensor_info(indices)
+        classification_signature = (
+            tf.saved_model.signature_def_utils.build_signature_def(
+                inputs={
+                    tf.saved_model.signature_constants.CLASSIFY_INPUTS:
+                        classify_inputs_tensor_info
+                },
+                outputs={
+                    tf.saved_model.signature_constants.CLASSIFY_OUTPUT_CLASSES:
+                        classes_output_tensor_info
+                },
+                method_name=tf.saved_model.signature_constants.
+                CLASSIFY_METHOD_NAME))
 
+	tensor_info_x = tf.saved_model.utils.build_tensor_info(sentence)
+	prediction_signature=(
+                tf.saved_model.signature_def_utils.build_signature_def(
+                        inputs={'problem':tensor_info_x},
+                        outputs={'classes': classes_output_tensor_info},
+                        method_name=tf.saved_model.signature_constants.PREDICT_METHOD_NAME))
+        legacy_init_op = tf.group(tf.tables_initializer(), name='legacy_init_op')
+        builder.add_meta_graph_and_variables(
+                sess, [tf.saved_model.tag_constants.SERVING],
+                signature_def_map={
+                        'predict_query':
+                                prediction_signature,
+                        tf.saved_model.signature_constants.DEFAULT_SERVING_SIGNATURE_DEF_KEY:
+                                classification_signature,
+                },
+        legacy_init_op=legacy_init_op)
+        builder.save()
+	print 'Done exporting!'
+	
     def reloadModelAndData(self):
         data = pickle.load( open("/aiap-demo/Path_training_data", "rb" ) )
         #data = {'words':words, 'classes':classes, 'train_x':train_x, 'train_y':train_y}
@@ -179,7 +246,8 @@ class Topic():
         self.solutions=list(set(solutions))
         self.topic=topic
 
-
+topic = Topic()
+tf.app.run(topic.trainPath())
 #objTopic=Topic()    
 #objTopic.trainPath()            
 # '''sentence="""Hi, I hope you are well,
