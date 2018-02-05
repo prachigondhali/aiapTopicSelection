@@ -23,14 +23,14 @@ topic_obj = Topic()
 def index():
 	return "Welcome to ABCNN!"
 
-@app.route('/retrain', methods = ['GET'])
+@app.route('/topic_modeling/retrain', methods = ['GET'])
 def retrain_models():
 	tf.reset_default_graph()
 	topic_obj.trainPath()
 	topic_obj.reloadModelAndData()
 	return "Retrainig Done!!"
  
-@app.route('/query', methods = ['POST'])
+@app.route('/topic_modeling/query', methods = ['POST'])
 def Topic_modeling():
 	#Extract data from request
 	data=request.get_json(force=True)
